@@ -1,0 +1,788 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Oregon FKT Trail Map</title>
+
+<!-- Mapbox GL JS -->
+<link href="https://api.mapbox.com/mapbox-gl-js/v3.4.0/mapbox-gl.css" rel="stylesheet" />
+<script src="https://api.mapbox.com/mapbox-gl-js/v3.4.0/mapbox-gl.js"></script>
+<!-- Chart.js for elevation profiles -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<!-- Google Fonts -->
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Mono:wght@300;400;500&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet" />
+
+<style>
+  :root {
+    --bg:        #0d1117;
+    --surface:   #161b22;
+    --border:    #30363d;
+    --text:      #e6edf3;
+    --muted:     #7d8590;
+    --gold:      #d4a843;
+    --silver:    #8b9bb4;
+    --bronze:    #a0674a;
+    --accent:    #f78166;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: 'DM Sans', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  /* ── HEADER ─────────────────────────────────────── */
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 24px;
+    height: 56px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+    z-index: 1000;
+  }
+  .logo {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 26px;
+    letter-spacing: 3px;
+    color: var(--text);
+  }
+  .logo span { color: var(--accent); }
+  .legend {
+    display: flex;
+    gap: 18px;
+    align-items: center;
+  }
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-family: 'DM Mono', monospace;
+    font-size: 11px;
+    color: var(--muted);
+    cursor: pointer;
+    transition: color .2s;
+  }
+  .legend-item:hover { color: var(--text); }
+  .legend-dot {
+    width: 10px; height: 10px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  /* ── MAP ─────────────────────────────────────────── */
+  #map-wrap {
+    flex: 1;
+    position: relative;
+    overflow: hidden;
+  }
+  #map { width: 100%; height: 100%; }
+  .mapboxgl-ctrl-attrib { font-size: 9px !important; }
+  .mapboxgl-ctrl-bottom-right { bottom: 8px; right: 8px; }
+
+  /* ── SIDE PANEL ──────────────────────────────────── */
+  #panel {
+    position: absolute;
+    top: 16px;
+    right: 16px;
+    width: 380px;
+    max-height: calc(100vh - 88px);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    transform: translateX(calc(100% + 32px));
+    transition: transform .35s cubic-bezier(.4,0,.2,1);
+    z-index: 900;
+  }
+  #panel.open { transform: translateX(0); }
+
+  .panel-header {
+    padding: 16px 20px 14px;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+    position: relative;
+  }
+  .trail-tag {
+    font-family: 'DM Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 6px;
+  }
+  .trail-name {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 28px;
+    letter-spacing: 2px;
+    line-height: 1;
+    color: var(--text);
+  }
+  .trail-meta {
+    display: flex;
+    gap: 16px;
+    margin-top: 10px;
+  }
+  .meta-pill {
+    font-family: 'DM Mono', monospace;
+    font-size: 11px;
+    color: var(--muted);
+  }
+  .meta-pill strong {
+    font-weight: 500;
+    color: var(--text);
+    display: block;
+    font-size: 13px;
+  }
+  .panel-close {
+    position: absolute;
+    top: 14px;
+    right: 16px;
+    background: none;
+    border: 1px solid var(--border);
+    color: var(--muted);
+    width: 28px; height: 28px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: color .15s, border-color .15s;
+  }
+  .panel-close:hover { color: var(--text); border-color: var(--text); }
+
+  /* ── PANEL SCROLL AREA ───────────────────────────── */
+  .panel-body {
+    overflow-y: auto;
+    flex: 1;
+  }
+  .panel-body::-webkit-scrollbar { width: 4px; }
+  .panel-body::-webkit-scrollbar-track { background: transparent; }
+  .panel-body::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+  /* ── ELEVATION SECTION ───────────────────────────── */
+  .elevation-section {
+    border-bottom: 1px solid var(--border);
+    padding: 14px 20px 16px;
+  }
+  .section-label {
+    font-family: 'DM Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 10px;
+  }
+  .elev-stats {
+    display: flex;
+    margin-bottom: 12px;
+  }
+  .elev-stat {
+    flex: 1;
+    font-family: 'DM Mono', monospace;
+    font-size: 10px;
+    color: var(--muted);
+    border-right: 1px solid var(--border);
+    padding-right: 10px;
+    margin-right: 10px;
+  }
+  .elev-stat:last-child { border-right: none; margin-right: 0; padding-right: 0; }
+  .elev-stat strong {
+    display: block;
+    font-size: 13px;
+    color: var(--text);
+    font-weight: 500;
+    margin-bottom: 1px;
+  }
+  .chart-wrap {
+    position: relative;
+    height: 110px;
+  }
+  .chart-loading {
+    height: 110px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: 'DM Mono', monospace;
+    font-size: 11px;
+    color: var(--muted);
+  }
+  .chart-no-data {
+    height: 80px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: 'DM Mono', monospace;
+    font-size: 11px;
+    color: var(--muted);
+    border: 1px dashed var(--border);
+    border-radius: 3px;
+  }
+
+  /* ── LEADERBOARD ─────────────────────────────────── */
+  .lb-section-title {
+    font-family: 'DM Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--muted);
+    padding: 14px 20px 8px;
+    border-bottom: 1px solid var(--border);
+  }
+  .lb-row {
+    display: grid;
+    grid-template-columns: 36px 1fr auto;
+    align-items: center;
+    padding: 10px 20px;
+    border-bottom: 1px solid rgba(48,54,61,.5);
+    transition: background .15s;
+  }
+  .lb-row:hover { background: rgba(255,255,255,.03); }
+  .rank {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 20px;
+    line-height: 1;
+  }
+  .rank-1 { color: var(--gold); }
+  .rank-2 { color: var(--silver); }
+  .rank-3 { color: var(--bronze); }
+  .rank-other { color: var(--muted); font-size: 14px; font-family: 'DM Mono', monospace; }
+  .runner-name { font-size: 14px; font-weight: 500; color: var(--text); line-height: 1.2; }
+  .runner-sub { font-family: 'DM Mono', monospace; font-size: 10px; color: var(--muted); margin-top: 2px; }
+  .type-badge {
+    display: inline-block;
+    font-size: 9px;
+    padding: 1px 5px;
+    border-radius: 2px;
+    margin-left: 4px;
+    font-family: 'DM Mono', monospace;
+    letter-spacing: .5px;
+  }
+  .type-Supported      { background: rgba(59,130,246,.15); color: #60a5fa; }
+  .type-Unsupported    { background: rgba(52,211,153,.15); color: #34d399; }
+  .type-Self-Supported { background: rgba(251,191,36,.15); color: #fbbf24; }
+  .time-col { text-align: right; }
+  .runner-time { font-family: 'DM Mono', monospace; font-size: 14px; font-weight: 500; color: var(--text); }
+  .runner-date { font-family: 'DM Mono', monospace; font-size: 10px; color: var(--muted); margin-top: 2px; }
+  .no-data {
+    padding: 24px 20px;
+    text-align: center;
+    color: var(--muted);
+    font-family: 'DM Mono', monospace;
+    font-size: 12px;
+    line-height: 1.8;
+  }
+  .no-data a { color: var(--accent); text-decoration: none; }
+
+  /* ── TOOLTIP ─────────────────────────────────────── */
+  .trail-tooltip-popup .mapboxgl-popup-content {
+    background: var(--surface) !important;
+    border: 1px solid var(--border) !important;
+    border-radius: 3px !important;
+    color: var(--text) !important;
+    padding: 5px 12px !important;
+    box-shadow: 0 4px 16px rgba(0,0,0,.4) !important;
+  }
+  .trail-tooltip-popup .mapboxgl-popup-tip { display: none !important; }
+
+  /* ── HINT ────────────────────────────────────────── */
+  #hint {
+    position: absolute;
+    bottom: 24px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    padding: 8px 18px;
+    border-radius: 3px;
+    font-family: 'DM Mono', monospace;
+    font-size: 11px;
+    color: var(--muted);
+    pointer-events: none;
+    opacity: 1;
+    transition: opacity 1s;
+    z-index: 800;
+    white-space: nowrap;
+  }
+  #hint.hidden { opacity: 0; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">FKTs <span>of</span> Oregon's Trails</div>
+  <div class="legend" id="legend"></div>
+</header>
+
+<div id="map-wrap">
+  <div id="map"></div>
+
+  <div id="panel">
+    <div class="panel-header">
+      <div class="trail-tag" id="p-tag">Trail</div>
+      <div class="trail-name" id="p-name">—</div>
+      <button class="panel-close" onclick="closePanel()">✕</button>
+      <div class="trail-meta" id="p-meta"></div>
+    </div>
+    <div class="panel-body">
+      <!-- Elevation profile -->
+      <div class="elevation-section">
+        <div class="section-label">Elevation Profile</div>
+        <div class="elev-stats" id="p-elev-stats"></div>
+        <div class="chart-wrap" id="p-chart-wrap">
+          <div class="chart-loading">Loading elevation data…</div>
+        </div>
+      </div>
+      <!-- FKT Leaderboard -->
+      <div id="p-leaderboard"></div>
+    </div>
+  </div>
+
+  <div id="hint">Click a trail to view FKT leaderboard &amp; elevation profile</div>
+</div>
+
+<script>
+// ══════════════════════════════════════════════════
+//  FKT DATA
+// ══════════════════════════════════════════════════
+const FKT_DATA = {
+  timberline: {
+    name: "Timberline Trail",
+    tag: "Mt. Hood Circumnavigation",
+    distance: "41 miles",
+    gain: "10,000 ft",
+    color: "#4e9fdc",
+    fkt_url: "https://fastestknowntime.com/route/timberline-trail-or",
+    records: [
+      { name: "Tyler Green",      time: "6:10:58",  date: "2018-09-30", type: "Unsupported" },
+      { name: "Max King",         time: "6:40:40",  date: "2015-10-28", type: "Unsupported" },
+      { name: "John Coffey",      time: "6:24:33",  date: "1982-08-28", type: "Supported"   },
+    ]
+  },
+  desert: {
+    name: "Oregon Desert Trail",
+    tag: "Eastern Oregon Traverse",
+    distance: "750 miles",
+    gain: "~60,000 ft",
+    color: "#f0a500",
+    fkt_url: "https://fastestknowntime.com/route/oregon-desert-trail-or",
+    records: [
+      { name: "Cristoph Teuscher", time: "17d 15h 00m", date: "2018-07-29", type: "Self-Supported" },
+    ]
+  },
+  coast: {
+    name: "Oregon Coast Trail",
+    tag: "Pacific Shoreline End-to-End",
+    distance: "408 miles",
+    gain: "~40,000 ft",
+    color: "#dd5613",
+    fkt_url: "https://fastestknowntime.com/route/oregon-coast-trail-or",
+    records: [
+      { name: "Jameson Collins",    time: "6d 8h 3m 38s",  date: "2024-07-28", type: "Supported" },
+      { name: "Nick Fowler",     time: "6d 10h 19m", date: "2024-06-11", type: "Self-Supported"   },
+      { name: "Tyler Weber",    time: "7d 17h 56m", date: "2023-07-21", type: "Supported" }
+    ]
+  },
+  peaks: {
+    name: "Oregon's 5 Highest Peaks",
+    tag: "Ten Thousanders",
+    distance: "150 miles",
+    gain: "35,000 ft",
+    color: "#a78bfa",
+    fkt_url: "https://fastestknowntime.com/route/oregon-5-highest-peaks",
+    records: [
+      { name: "Jason Hardrath", time: "4:6:15:0", date: "2019-09-04", type: "Supported" },
+    ]
+  },
+  c2s: {
+    name: "Corvallis to Coast Trail",
+    tag: "Willamette Valley to the Coast",
+    distance: "60 miles",
+    gain: "5,000 ft",
+    color: "#4ade80",
+    fkt_url: "https://fastestknowntime.com/route/corvallis-to-the-sea-trail-or",
+    records: [
+      { name: "Nick Tyree", time: "8:26:38", date: "2023-03-12", type: "Supported" },
+      { name: "Anthony Jay", time: "9:2:14", date: "2022-10-01", type: "Unsupported" },
+      { name: "Ethan Hardacre", time: "9:4:37", date: "2022-02-12", type: "Supported" },
+
+
+    ]
+  },
+  bmt: {
+    name: "Blue Mountains Trail",
+    tag: "Northeast Oregon Highlands",
+    distance: "530 miles",
+    gain: "80,000 ft",
+    color: "#e879a0",
+    fkt_url: "https://fastestknowntime.com/route/blue-mountains-trail-or",
+    records: [
+      { name: "Christoph Teuscher", time: "14:17:22:00", date: "2022-08-01", type: "Self Supported" },
+    ]
+  }
+};
+
+// ══════════════════════════════════════════════════
+//  GPX FILE PATHS
+// ══════════════════════════════════════════════════
+const GPX_FILES = {
+  timberline: "traildata/timberline_trail.gpx",
+  desert:     "traildata/oregon_desert_trail.gpx",
+  coast:      "traildata/oct.gpx",
+  peaks:      "traildata/or5highest.gpx",
+  c2s:        "traildata/c2c.gpx",
+  bmt:        "traildata/blue.gpx"
+};
+
+// ══════════════════════════════════════════════════
+//  FALLBACK PATHS  [lng, lat]
+// ══════════════════════════════════════════════════
+const FALLBACK_PATHS = {
+  timberline: [[-121.7425,45.3736],[-121.7200,45.3850],[-121.6950,45.3980],[-121.6800,45.4100],[-121.6500,45.4050],[-121.6300,45.3900],[-121.6400,45.3700],[-121.6700,45.3550],[-121.7000,45.3500],[-121.7300,45.3600],[-121.7425,45.3736]],
+  desert:     [[-117.0200,42.0020],[-117.5000,42.1500],[-118.2000,42.3000],[-118.8000,42.5000],[-119.5000,42.8000],[-120.2000,43.2000],[-120.7000,43.5000],[-121.1000,43.7000],[-121.4000,43.9000],[-121.5000,44.0500]],
+  coast:      [[-124.2500,42.0100],[-124.3600,42.3000],[-124.5200,42.8000],[-124.4000,43.3000],[-124.2000,43.8000],[-124.1000,44.2000],[-124.0500,44.6000],[-123.9600,45.0000],[-123.9700,45.5000],[-123.9200,46.0000],[-123.9700,46.2400]],
+  peaks:      [[-122.1947,42.0993],[-121.7706,43.6490],[-121.7474,44.4226],[-121.6960,45.3733],[-121.7269,46.8523]],
+  c2s:        [[-123.2620,44.5646],[-123.3500,44.5800],[-123.5000,44.5900],[-123.6500,44.6000],[-123.7800,44.6100],[-123.8800,44.5700],[-123.9500,44.5500],[-124.0500,44.5200],[-124.0650,44.4800]],
+  bmt:        [[-117.9200,45.6500],[-118.0500,45.5000],[-118.2000,45.3500],[-118.4000,45.2000],[-118.5500,45.0500],[-118.7000,44.9000],[-118.8500,44.7500],[-119.0000,44.6000],[-119.1500,44.4500]]
+};
+
+// Cache parsed GPX data
+const gpxCache = {};
+
+// ══════════════════════════════════════════════════
+//  MAPBOX INIT
+// ══════════════════════════════════════════════════
+mapboxgl.accessToken = 'pk.eyJ1IjoiZGR1Ymxpbm4iLCJhIjoiY21sZmkyM21zMDIxejNkcHRvcXNoMXl2OCJ9.Ih7LJ9ecprExSW8PDzk9PQ';
+
+const map = new mapboxgl.Map({
+  container: 'map',
+  style: 'mapbox://styles/ddublinn/cmmlkurr2001r01skc2kdebkz',
+  center: [-120.5, 44.0],
+  zoom: 6.5
+});
+
+map.addControl(new mapboxgl.NavigationControl(), 'bottom-right');
+
+map.addControl(new mapboxgl.NavigationControl(), 'bottom-right');
+
+const tooltip = new mapboxgl.Popup({
+  closeButton: false,
+  closeOnClick: false,
+  className: 'trail-tooltip-popup',
+  offset: 8
+});
+
+// ══════════════════════════════════════════════════
+//  GPX PARSER — extracts coords, elevations, distances
+// ══════════════════════════════════════════════════
+function parseGpx(gpxText) {
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(gpxText, 'application/xml');
+  const trkpts = Array.from(doc.querySelectorAll('trkpt'));
+  if (trkpts.length === 0) return null;
+
+  const coords = [], elevations = [], distances = [];
+  let cumKm = 0, prevLat = null, prevLon = null;
+
+  trkpts.forEach((pt, i) => {
+    const lat = parseFloat(pt.getAttribute('lat'));
+    const lon = parseFloat(pt.getAttribute('lon'));
+    const eleEl = pt.querySelector('ele');
+    const ele = eleEl ? parseFloat(eleEl.textContent) : null;
+
+    coords.push([lon, lat]);
+    elevations.push(ele);
+
+    if (i > 0 && prevLat !== null) cumKm += haversineKm(prevLat, prevLon, lat, lon);
+    distances.push(cumKm);
+
+    prevLat = lat; prevLon = lon;
+  });
+
+  return { coords, elevations, distances };
+}
+
+function haversineKm(lat1, lon1, lat2, lon2) {
+  const R = 6371, dLat = (lat2-lat1)*Math.PI/180, dLon = (lon2-lon1)*Math.PI/180;
+  const a = Math.sin(dLat/2)**2 + Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLon/2)**2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+}
+
+// ══════════════════════════════════════════════════
+//  ELEVATION CHART
+// ══════════════════════════════════════════════════
+let elevChart = null;
+
+function buildElevationSection(trailId, trailColor) {
+  const wrapEl  = document.getElementById('p-chart-wrap');
+  const statsEl = document.getElementById('p-elev-stats');
+
+  // Destroy previous chart instance
+  if (elevChart) { elevChart.destroy(); elevChart = null; }
+  wrapEl.innerHTML = '<div class="chart-loading">Loading elevation data…</div>';
+  statsEl.innerHTML = '';
+
+  const cached = gpxCache[trailId];
+  if (!cached || !cached.elevations || cached.elevations.every(e => e === null)) {
+    wrapEl.innerHTML = '<div class="chart-no-data">No elevation data in GPX file</div>';
+    return;
+  }
+
+  const { elevations, distances } = cached;
+  const valid = elevations.map((e, i) => ({ e, d: distances[i] })).filter(p => p.e !== null);
+  if (valid.length < 2) {
+    wrapEl.innerHTML = '<div class="chart-no-data">Insufficient elevation data</div>';
+    return;
+  }
+
+  // Downsample to ~300 pts for performance on long trails
+  const step = Math.max(1, Math.floor(valid.length / 300));
+  const sampled = valid.filter((_, i) => i % step === 0);
+
+  const elevFt = sampled.map(p => Math.round(p.e * 3.28084));
+  const distMi = sampled.map(p => (p.d * 0.621371).toFixed(1));
+
+  // Calc gain / loss from sampled data
+  let gain = 0, loss = 0;
+  for (let i = 1; i < elevFt.length; i++) {
+    const diff = elevFt[i] - elevFt[i-1];
+    if (diff > 0) gain += diff; else loss += Math.abs(diff);
+  }
+
+  statsEl.innerHTML = `
+    <div class="elev-stat"><strong>${Math.min(...elevFt).toLocaleString()} ft</strong>Low</div>
+    <div class="elev-stat"><strong>${Math.max(...elevFt).toLocaleString()} ft</strong>High</div>
+    <div class="elev-stat"><strong>+${gain.toLocaleString()} ft</strong>Gain</div>
+    <div class="elev-stat"><strong>−${loss.toLocaleString()} ft</strong>Loss</div>
+  `;
+
+  wrapEl.innerHTML = '<canvas id="elev-canvas"></canvas>';
+  const ctx = document.getElementById('elev-canvas').getContext('2d');
+
+  const gradient = ctx.createLinearGradient(0, 0, 0, 110);
+  gradient.addColorStop(0, trailColor + '55');
+  gradient.addColorStop(1, trailColor + '08');
+
+  elevChart = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: distMi,
+      datasets: [{
+        data: elevFt,
+        borderColor: trailColor,
+        borderWidth: 1.5,
+        backgroundColor: gradient,
+        fill: true,
+        pointRadius: 0,
+        tension: 0.3
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: { duration: 350 },
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          backgroundColor: '#161b22',
+          borderColor: '#30363d',
+          borderWidth: 1,
+          titleColor: '#7d8590',
+          bodyColor: '#e6edf3',
+          titleFont: { family: "'DM Mono', monospace", size: 10 },
+          bodyFont: { family: "'DM Mono', monospace", size: 12 },
+          padding: 8,
+          callbacks: {
+            title: items => `${items[0].label} mi`,
+            label: item  => `${item.raw.toLocaleString()} ft`
+          }
+        }
+      },
+      scales: {
+        x: {
+          ticks: {
+            color: '#7d8590',
+            font: { family: "'DM Mono', monospace", size: 9 },
+            maxTicksLimit: 6,
+            maxRotation: 0
+          },
+          grid: { color: 'rgba(48,54,61,0.5)' },
+          border: { color: '#30363d' }
+        },
+        y: {
+          ticks: {
+            color: '#7d8590',
+            font: { family: "'DM Mono', monospace", size: 9 },
+            maxTicksLimit: 4,
+            callback: v => v.toLocaleString() + ' ft'
+          },
+          grid: { color: 'rgba(48,54,61,0.5)' },
+          border: { color: '#30363d' }
+        }
+      }
+    }
+  });
+}
+
+// ══════════════════════════════════════════════════
+//  PANEL LOGIC
+// ══════════════════════════════════════════════════
+let hintHidden = false;
+
+function openPanel(trailId) {
+  const t = FKT_DATA[trailId];
+  if (!t) return;
+
+  document.getElementById('p-tag').textContent = t.tag;
+  document.getElementById('p-name').textContent = t.name;
+  document.getElementById('p-meta').innerHTML = `
+    <div class="meta-pill"><strong>${t.distance}</strong>Distance</div>
+    <div class="meta-pill"><strong>${t.gain}</strong>Elevation Gain</div>
+  `;
+
+  // Leaderboard
+  const lb = document.getElementById('p-leaderboard');
+  const rows = (t.records || []).map((r, i) => {
+    const rankN = i + 1;
+    const rankClass = rankN <= 3 ? `rank-${rankN}` : 'rank-other';
+    return `
+      <div class="lb-row">
+        <div class="rank ${rankClass}">${rankN}</div>
+        <div class="runner-info">
+          <div class="runner-name">${r.name}</div>
+          <div class="runner-sub"><span class="type-badge type-${r.type.replace(/ /g,'-')}">${r.type}</span></div>
+        </div>
+        <div class="time-col">
+          <div class="runner-time">${r.time}</div>
+          <div class="runner-date">${r.date}</div>
+        </div>
+      </div>`;
+  }).join('');
+
+  lb.innerHTML = `
+    <div class="lb-section-title">FKT Leaderboard — fastestknowntime.com</div>
+    ${rows || '<div class="no-data">No records yet.</div>'}
+    <div class="no-data" style="padding:16px 20px 8px;text-align:left;">
+      <a href="${t.fkt_url}" target="_blank">View full leaderboard →</a>
+    </div>`;
+
+  // Elevation chart (reads from cache)
+  buildElevationSection(trailId, t.color);
+
+  document.getElementById('panel').classList.add('open');
+  if (!hintHidden) {
+    document.getElementById('hint').classList.add('hidden');
+    hintHidden = true;
+  }
+}
+
+function closePanel() {
+  document.getElementById('panel').classList.remove('open');
+}
+
+// ══════════════════════════════════════════════════
+//  MAP TRAIL RENDERING
+// ══════════════════════════════════════════════════
+function addTrailToMap(id, geojson) {
+  const t = FKT_DATA[id];
+  const sourceId     = `trail-${id}`;
+  const layerId      = `trail-line-${id}`;
+  const hoverLayerId = `trail-hover-${id}`;
+
+  map.addSource(sourceId, { type: 'geojson', data: geojson });
+
+  map.addLayer({
+    id: layerId,
+    type: 'line',
+    source: sourceId,
+    layout: { 'line-join': 'round', 'line-cap': 'round' },
+    paint: {
+      'line-color': t.color,
+      'line-width': ['interpolate', ['linear'], ['zoom'], 5, 2, 10, 4],
+      'line-opacity': 0.95
+    }
+  });
+
+  // Wide invisible hit target
+  map.addLayer({
+    id: hoverLayerId,
+    type: 'line',
+    source: sourceId,
+    layout: { 'line-join': 'round', 'line-cap': 'round' },
+    paint: { 'line-color': t.color, 'line-width': 20, 'line-opacity': 0 }
+  });
+
+  map.on('click', hoverLayerId, () => openPanel(id));
+
+  map.on('mouseenter', hoverLayerId, (e) => {
+    map.getCanvas().style.cursor = 'pointer';
+    map.setPaintProperty(layerId, 'line-width', ['interpolate', ['linear'], ['zoom'], 5, 4, 10, 7]);
+    map.setPaintProperty(layerId, 'line-opacity', 1);
+    tooltip.setLngLat(e.lngLat)
+      .setHTML(`<span style="font-family:'DM Mono',monospace;font-size:11px;color:#e6edf3">${t.name}</span>`)
+      .addTo(map);
+  });
+  map.on('mousemove', hoverLayerId, (e) => tooltip.setLngLat(e.lngLat));
+  map.on('mouseleave', hoverLayerId, () => {
+    map.getCanvas().style.cursor = '';
+    map.setPaintProperty(layerId, 'line-width', ['interpolate', ['linear'], ['zoom'], 5, 2, 10, 4]);
+    map.setPaintProperty(layerId, 'line-opacity', 0.85);
+    tooltip.remove();
+  });
+}
+
+function addFallbackTrail(id) {
+  const coords = FALLBACK_PATHS[id];
+  if (!coords) return;
+  addTrailToMap(id, { type: 'Feature', geometry: { type: 'LineString', coordinates: coords }, properties: {} });
+}
+
+async function loadGpxTrail(id) {
+  try {
+    const res = await fetch(GPX_FILES[id]);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const text = await res.text();
+    const parsed = parseGpx(text);
+    if (!parsed) throw new Error('No trackpoints found');
+    gpxCache[id] = parsed;   // store for elevation chart
+    addTrailToMap(id, { type: 'Feature', geometry: { type: 'LineString', coordinates: parsed.coords }, properties: {} });
+  } catch (err) {
+    console.warn(`GPX not loaded for "${id}" (${err.message}) — using fallback`);
+    addFallbackTrail(id);
+  }
+}
+
+// ══════════════════════════════════════════════════
+//  LEGEND
+// ══════════════════════════════════════════════════
+const legendEl = document.getElementById('legend');
+Object.entries(FKT_DATA).forEach(([id, t]) => {
+  const item = document.createElement('div');
+  item.className = 'legend-item';
+  item.innerHTML = `<div class="legend-dot" style="background:${t.color}"></div>${t.name}`;
+  item.addEventListener('click', () => openPanel(id));
+  legendEl.appendChild(item);
+});
+
+// ══════════════════════════════════════════════════
+//  BOOT
+// ══════════════════════════════════════════════════
+map.on('load', () => {
+  Object.keys(FKT_DATA).forEach(id => loadGpxTrail(id));
+});
+</script>
+</body>
+</html>
